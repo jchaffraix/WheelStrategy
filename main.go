@@ -3,7 +3,9 @@ package main
 import (
   "context"
   "encoding/json"
+  "encoding/base64"
   "fmt"
+  "io/ioutil"
   "log"
   "net/http"
   "net/url"
@@ -20,7 +22,7 @@ type AppSettings struct {
   TDARedirectURL string `json:"tda_redirect_url", datastore:",noindex"`
 }
 
-const APP_SETTINGS_TABLE string = "Settings"
+const kAppSettingsTable string = "Settings"
 
 func getLocalAppSettings() *AppSettings {
   local_var, set := os.LookupEnv("APP_SETTINGS")
@@ -53,7 +55,7 @@ func getAppSettings() (*AppSettings, error) {
   }
 
   settings := new(AppSettings)
-  k := datastore.NameKey(APP_SETTINGS_TABLE, "app_settings", nil)
+  k := datastore.NameKey(kAppSettingsTable, "app_settings", nil)
   if err := client.Get(ctx, k, settings); err != nil {
     return nil, err
   }
@@ -82,6 +84,23 @@ func getOauthClient() (*oauth2.Config, error) {
 
 func logRequest(req *http.Request) {
   log.Printf("Received request for %s", req.URL.String())
+}
+
+const kLoginCookieName string = "LOGIN"
+
+type CookieData struct {
+  TDAAccountId string `json:"tda_account_id"`
+  TDAAccessToken string `json:"access_token"`
+  // TODO: Add expiry + refresh_token.
+}
+
+type SecuritiesAccount struct {
+  AccountId string `json:"accountId"`
+}
+
+type Account struct {
+  SecuritiesAccount SecuritiesAccount `json:"securitiesAccount"`
+  // Ignore all other fields
 }
 
 func oauthRedirectHandler(w http.ResponseWriter, req *http.Request) {
@@ -125,21 +144,56 @@ func oauthRedirectHandler(w http.ResponseWriter, req *http.Request) {
   log.Printf("AccessToken: %s", token.AccessToken)
   log.Printf("Expiry: %+v", token.Expiry)
   log.Printf("Refresh Token: %s", token.RefreshToken)
-  // TODO: Store this in a DB.
-  //client := conf.Client(ctx, tok)
-}
 
-func mainPageHandler(w http.ResponseWriter, req *http.Request) {
-  logRequest(req)
+  // TODO: This should probably be a separate step in the UI.
 
-  if req.URL.Path != "/" {
-      http.NotFound(w, req)
-      return
+  // Get account ID.
+  client := conf.Client(ctx, token)
+  resp, err := client.Get("https://api.tdameritrade.com/v1/accounts")
+	if err != nil {
+    log.Printf("[ERROR] Failed getting the accounts for the user (err = %+v)", err)
+    http.Error(w, "Internal Error", http.StatusInternalServerError)
+    return
+  }
+  defer resp.Body.Close()
+  body, err := ioutil.ReadAll(resp.Body)
+  if err != nil {
+    log.Printf("[ERROR] Failed to read response (err = %+v)", err)
+    http.Error(w, "Internal Error", http.StatusInternalServerError)
+    return
   }
 
-  // TODO: Check that the user is logged in.
-  // TODO: http.ServeFile(w, req, "index.html")
+  var accounts []Account
+  err = json.Unmarshal(body, &accounts)
+  if err != nil {
+    log.Printf("[ERROR] Failed to parse the accounts response (err = %+v): %+v", err, string(body))
+    http.Error(w, "Internal Error", http.StatusInternalServerError)
+    return
+  }
+  if len(accounts) > 1 {
+    log.Printf("[ERROR] Ignoring multiple accounts and picking first one")
+    http.Error(w, "Internal Error", http.StatusInternalServerError)
+  }
 
+  // Store in a cookie (DB-less for now).
+  cookie, err := json.Marshal(CookieData{
+    TDAAccountId: accounts[0].SecuritiesAccount.AccountId,
+    TDAAccessToken: token.AccessToken,
+  })
+  if err != nil {
+    log.Printf("[ERROR] Failed to marshall the cookie (err = %+v)", err)
+    http.Error(w, "Internal Error", http.StatusInternalServerError)
+    return
+  }
+  http.SetCookie(w, &http.Cookie{
+    Name: kLoginCookieName,
+    Value: base64.StdEncoding.EncodeToString(cookie),
+    Path: "/",
+  })
+  http.Redirect(w, req, "/", 302)
+}
+
+func renderUnauthenticatedPage(w http.ResponseWriter) {
   conf, err := getOauthClient()
   if err != nil {
     log.Printf("Error when getting the oauth client (err = %+v)", err)
@@ -156,6 +210,33 @@ func mainPageHandler(w http.ResponseWriter, req *http.Request) {
 <a href="%s"><button>Logged in</button></a>
 `
   w.Write([]byte(fmt.Sprintf(page, url)))
+}
+
+func mainPageHandler(w http.ResponseWriter, req *http.Request) {
+  logRequest(req)
+
+  if req.URL.Path != "/" {
+      http.NotFound(w, req)
+      return
+  }
+
+  // Prevent caching as we return different answers depending on the login state.
+  // TODO: This may be a bit crude as the page is always the same.
+  w.Header().Add("Cache-Control", "no-store")
+  loginCookie, err := req.Cookie(kLoginCookieName)
+  if err != nil {
+    log.Printf("[Error] Couldn't get login cookie (err = %+v)", err)
+    renderUnauthenticatedPage(w)
+    return
+  }
+  _ = loginCookie
+
+  // TODO: http.ServeFile(w, req, "index.html")
+  page := `
+<!DOCTYPE html>
+<div>Authed!</div>
+`
+  w.Write([]byte(fmt.Sprintf(page)))
 }
 
 func main() {
