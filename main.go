@@ -204,25 +204,7 @@ func renderUnauthenticatedPage(w http.ResponseWriter) {
     return
   }
 
-  settings, err := getAppSettings()
-  if err != nil {
-    log.Printf("[ERROR] Failed getting the app settings (err = %+v)", err)
-    http.Error(w, "Internal Error", http.StatusInternalServerError)
-    return
-  }
-
-  start := time.Now().AddDate(/*years*/0, /*months*/0, /*days*/20)
-  end := start.AddDate(/*years*/0, /*months*/0, /*days*/30)
-  options, err := GetOptionChain("WY", settings.TDAClientId, PUT, start, end)
-  if err != nil {
-    log.Printf("[ERROR] Failed to get option chains (err = %+v)", err)
-    http.Error(w, "Internal Error", http.StatusInternalServerError)
-    return
-  }
-
-  log.Printf("Got options: %+v", options)
-
-  // TODO: Fill state for real so we can validate the redirect.
+ // TODO: Fill state for real so we can validate the redirect.
   state := "state"
   url := conf.AuthCodeURL(state, oauth2.AccessTypeOffline)
   page := `
@@ -299,9 +281,41 @@ func mainPageHandler(w http.ResponseWriter, req *http.Request) {
   w.Write([]byte(fmt.Sprintf(page, url)))
 }
 
+func optionsHandler(w http.ResponseWriter, req *http.Request) {
+  settings, err := getAppSettings()
+  if err != nil {
+    log.Printf("[ERROR] Failed getting the app settings (err = %+v)", err)
+    http.Error(w, "Internal Error", http.StatusInternalServerError)
+    return
+  }
+
+  start := time.Now().AddDate(/*years*/0, /*months*/0, /*days*/20)
+  end := start.AddDate(/*years*/0, /*months*/0, /*days*/30)
+  options, err := GetOptionChain("WY", settings.TDAClientId, PUT, start, end)
+  if err != nil {
+    log.Printf("[ERROR] Failed to get option chains (err = %+v)", err)
+    http.Error(w, "Internal Error", http.StatusInternalServerError)
+    return
+  }
+
+  // Filter those options.
+  suggestions := FilterOptions(1<<64 - 1.24, 33.5, options)
+
+  // TODO: This should return Content-Type JSON.
+  page := `<DOCTYPE html>
+Options:<br>
+<pre>%+v</pre>
+
+Suggestions:<br>
+<pre>%+v</pre>
+`
+  w.Write([]byte(fmt.Sprintf(page, options, suggestions)))
+}
+
 func main() {
   http.HandleFunc("/", mainPageHandler)
   http.HandleFunc("/oauth", oauthRedirectHandler)
+  http.HandleFunc("/options", optionsHandler)
 
   port := os.Getenv("PORT")
   if port == "" {
