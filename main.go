@@ -10,6 +10,7 @@ import (
   "net/http"
   "net/url"
   "os"
+  "time"
 
   "golang.org/x/oauth2"
 
@@ -194,12 +195,32 @@ func oauthRedirectHandler(w http.ResponseWriter, req *http.Request) {
 }
 
 func renderUnauthenticatedPage(w http.ResponseWriter) {
+  log.Printf("Displaying unauthenticated page")
+
   conf, err := getOAuthClient()
   if err != nil {
     log.Printf("Error when getting the oauth client (err = %+v)", err)
     http.Error(w, "Internal Error", http.StatusInternalServerError)
     return
   }
+
+  settings, err := getAppSettings()
+  if err != nil {
+    log.Printf("[ERROR] Failed getting the app settings (err = %+v)", err)
+    http.Error(w, "Internal Error", http.StatusInternalServerError)
+    return
+  }
+
+  start := time.Now().AddDate(/*years*/0, /*months*/0, /*days*/20)
+  end := start.AddDate(/*years*/0, /*months*/0, /*days*/30)
+  options, err := GetOptionChain("WY", settings.TDAClientId, PUT, start, end)
+  if err != nil {
+    log.Printf("[ERROR] Failed to get option chains (err = %+v)", err)
+    http.Error(w, "Internal Error", http.StatusInternalServerError)
+    return
+  }
+
+  log.Printf("Got options: %+v", options)
 
   // TODO: Fill state for real so we can validate the redirect.
   state := "state"
@@ -256,9 +277,9 @@ func mainPageHandler(w http.ResponseWriter, req *http.Request) {
   log.Printf("[INFO] Found AccountID %s", loginInfo.TDAAccountId)
   log.Printf("[INFO] Found Access-Token %s", loginInfo.TDAAccessToken)
 
-  ctx := context.Background()
+  /*ctx := context.Background()
   token := oauth2.Token{AccessToken: loginInfo.TDAAccessToken}
-  client := conf.Client(ctx, &token);
+  client := conf.Client(ctx, &token);*/
 
   // TODO: WRITE THE ALGORITHM!
 
