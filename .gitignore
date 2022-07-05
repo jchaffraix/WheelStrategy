@@ -1,0 +1,8 @@
+# Binary
+main.exe
+
+# VIM
+*.swp
+
+# Go modules
+go.sum
