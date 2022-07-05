@@ -63,7 +63,7 @@ func getAppSettings() (*AppSettings, error) {
   return settings, nil
 }
 
-func getOauthClient() (*oauth2.Config, error) {
+func getOAuthClient() (*oauth2.Config, error) {
   s, err := getAppSettings()
   if err != nil {
     return nil, err
@@ -125,7 +125,7 @@ func oauthRedirectHandler(w http.ResponseWriter, req *http.Request) {
 
   // TODO: Validate the state!
 
-  conf, err := getOauthClient()
+  conf, err := getOAuthClient()
   if err != nil {
     log.Printf("[ERROR] Failed getting the oauth client (err = %+v)", err)
     http.Error(w, "Internal Error", http.StatusInternalServerError)
@@ -181,7 +181,7 @@ func oauthRedirectHandler(w http.ResponseWriter, req *http.Request) {
     TDAAccessToken: token.AccessToken,
   })
   if err != nil {
-    log.Printf("[ERROR] Failed to marshall the cookie (err = %+v)", err)
+    log.Printf("[ERROR] Failed to marshal the cookie (err = %+v)", err)
     http.Error(w, "Internal Error", http.StatusInternalServerError)
     return
   }
@@ -194,7 +194,7 @@ func oauthRedirectHandler(w http.ResponseWriter, req *http.Request) {
 }
 
 func renderUnauthenticatedPage(w http.ResponseWriter) {
-  conf, err := getOauthClient()
+  conf, err := getOAuthClient()
   if err != nil {
     log.Printf("Error when getting the oauth client (err = %+v)", err)
     http.Error(w, "Internal Error", http.StatusInternalServerError)
@@ -225,18 +225,57 @@ func mainPageHandler(w http.ResponseWriter, req *http.Request) {
   w.Header().Add("Cache-Control", "no-store")
   loginCookie, err := req.Cookie(kLoginCookieName)
   if err != nil {
-    log.Printf("[Error] Couldn't get login cookie (err = %+v)", err)
+    // TODO: ErrNoCookie is emitted when not present.
+    log.Printf("[INFO] Couldn't get login cookie (err = %+v)", err)
     renderUnauthenticatedPage(w)
     return
   }
-  _ = loginCookie
 
+  cookie_value, err := base64.StdEncoding.DecodeString(loginCookie.Value)
+  if err != nil {
+    log.Printf("[Error] Base64 decode the login cookie (err = %+v)", err)
+    renderUnauthenticatedPage(w)
+    return
+  }
+
+  loginInfo := new(CookieData)
+  err = json.Unmarshal(cookie_value, &loginInfo)
+  if err != nil {
+    log.Printf("[ERROR] Cookie is invalid, failed to parse it (err = %+v)", err)
+    // TODO: Clear the cookie to help recoveries?
+    renderUnauthenticatedPage(w)
+    return
+  }
+
+  conf, err := getOAuthClient()
+  if err != nil {
+    log.Printf("[ERROR] Failed getting the oauth client (err = %+v)", err)
+    http.Error(w, "Internal Error", http.StatusInternalServerError)
+    return
+  }
+  log.Printf("[INFO] Found AccountID %s", loginInfo.TDAAccountId)
+  log.Printf("[INFO] Found Access-Token %s", loginInfo.TDAAccessToken)
+
+  ctx := context.Background()
+  token := oauth2.Token{AccessToken: loginInfo.TDAAccessToken}
+  client := conf.Client(ctx, &token);
+
+  // TODO: WRITE THE ALGORITHM!
+
+  // TODO: The chains endpoint uses the app's key, not the bearer token.
+  /*resp, err := client.Get("https://api.tdameritrade.com/v1/marketdata/chains")
+  _ = resp*/
+
+  // TODO: Fill state for real so we can validate the redirect.
+  state := "state"
+  url := conf.AuthCodeURL(state, oauth2.AccessTypeOffline)
   // TODO: http.ServeFile(w, req, "index.html")
   page := `
 <!DOCTYPE html>
 <div>Authed!</div>
+<a href="%s"><button>Logged in</button></a>
 `
-  w.Write([]byte(fmt.Sprintf(page)))
+  w.Write([]byte(fmt.Sprintf(page, url)))
 }
 
 func main() {
