@@ -83,6 +83,31 @@ func getOAuthClient() (*oauth2.Config, error) {
 	}, nil
 }
 
+func getLoginCookieData(req *http.Request) (*CookieData, error) {
+  loginCookie, err := req.Cookie(kLoginCookieName)
+  if err != nil {
+    // TODO: ErrNoCookie is emitted when not present.
+    log.Printf("[INFO] Couldn't get login cookie (err = %+v)", err)
+    return nil, err
+  }
+
+  cookie_value, err := base64.StdEncoding.DecodeString(loginCookie.Value)
+  if err != nil {
+    log.Printf("[Error] Base64 decode the login cookie (err = %+v)", err)
+    return nil, err
+  }
+
+  loginInfo := new(CookieData)
+  err = json.Unmarshal(cookie_value, &loginInfo)
+  if err != nil {
+    log.Printf("[ERROR] Cookie is invalid, failed to parse it (err = %+v)", err)
+    // TODO: Clear the cookie to help recoveries?
+    return nil, err
+  }
+
+  return loginInfo, nil
+}
+
 func logRequest(req *http.Request) {
   log.Printf("Received request for %s", req.URL.String())
 }
@@ -91,7 +116,7 @@ const kLoginCookieName string = "LOGIN"
 
 type CookieData struct {
   TDAAccountId string `json:"tda_account_id"`
-  TDAAccessToken string `json:"access_token"`
+  TDAAccessToken string `json:"tda_access_token"`
   // TODO: Add expiry + refresh_token.
 }
 
@@ -186,10 +211,14 @@ func oauthRedirectHandler(w http.ResponseWriter, req *http.Request) {
     http.Error(w, "Internal Error", http.StatusInternalServerError)
     return
   }
+
+  // TODO: Make this a constant.
+  expiry, _ := time.ParseDuration("30m")
   http.SetCookie(w, &http.Cookie{
     Name: kLoginCookieName,
     Value: base64.StdEncoding.EncodeToString(cookie),
     Path: "/",
+    Expires: time.Now().Add(expiry),
   })
   http.Redirect(w, req, "/", 302)
 }
@@ -209,9 +238,44 @@ func oauthLoginHandler(w http.ResponseWriter, req *http.Request) {
   http.Redirect(w, req, url, 302)
 }
 
-func renderUnauthenticatedPage(w http.ResponseWriter, req * http.Request) {
-  log.Printf("Displaying unauthenticated page")
-  http.ServeFile(w, req, "index.html")
+type oauthInfoResponse struct {
+  LoggedIn bool `json:"logged_in"`
+  TDAAccountId string `json:"tda_account_id"`
+  TDAAccessToken string `json:"tda_access_token"`
+}
+
+func oauthInfoHandler(w http.ResponseWriter, req *http.Request) {
+  // Prevent caching as we return different answers depending on the login state.
+  // TODO: This may be a bit crude as the page is always the same.
+  w.Header().Add("Cache-Control", "no-store")
+
+  resp := oauthInfoResponse{
+    LoggedIn: false,
+  }
+
+  // If we return early, it is because we are not authenticated.
+  defer func() {
+    respStr, err := json.Marshal(resp)
+    if err != nil {
+      log.Printf("[ERROR] Failed to marshal the cookie (err = %+v)", err)
+      http.Error(w, "Internal Error", http.StatusInternalServerError)
+      return
+    }
+    w.Header().Add("Content-Type", "application/json")
+    w.Write(respStr)
+  }()
+
+  loginData, err := getLoginCookieData(req)
+  if err != nil {
+    // Ignore error as we log in getLoginCookieData.
+    return
+  }
+
+  log.Printf("[INFO] Found AccountID %s", loginData.TDAAccountId)
+  log.Printf("[INFO] Found Access-Token %s", loginData.TDAAccessToken)
+  resp.LoggedIn = true
+  resp.TDAAccountId = loginData.TDAAccountId
+  resp.TDAAccessToken = loginData.TDAAccessToken
 }
 
 func mainPageHandler(w http.ResponseWriter, req *http.Request) {
@@ -222,42 +286,18 @@ func mainPageHandler(w http.ResponseWriter, req *http.Request) {
       return
   }
 
-  // Prevent caching as we return different answers depending on the login state.
-  // TODO: This may be a bit crude as the page is always the same.
-  w.Header().Add("Cache-Control", "no-store")
-  loginCookie, err := req.Cookie(kLoginCookieName)
-  if err != nil {
-    // TODO: ErrNoCookie is emitted when not present.
-    log.Printf("[INFO] Couldn't get login cookie (err = %+v)", err)
-    renderUnauthenticatedPage(w, req)
-    return
-  }
+  http.ServeFile(w, req, "index.html")
+}
 
-  cookie_value, err := base64.StdEncoding.DecodeString(loginCookie.Value)
-  if err != nil {
-    log.Printf("[Error] Base64 decode the login cookie (err = %+v)", err)
-    renderUnauthenticatedPage(w, req)
-    return
-  }
-
-  loginInfo := new(CookieData)
-  err = json.Unmarshal(cookie_value, &loginInfo)
-  if err != nil {
-    log.Printf("[ERROR] Cookie is invalid, failed to parse it (err = %+v)", err)
-    // TODO: Clear the cookie to help recoveries?
-    renderUnauthenticatedPage(w, req)
-    return
-  }
-
-  log.Printf("[INFO] Found AccountID %s", loginInfo.TDAAccountId)
-  log.Printf("[INFO] Found Access-Token %s", loginInfo.TDAAccessToken)
-
-  renderUnauthenticatedPage(w, req)
+type tdaAuth struct {
+  AccountId string `json:"account_id"`
+  AccessToken string `json:"access_token"`
 }
 
 type optionsHandlerResponse struct {
   Options []Option `json:"options"`
   Suggestions []Option `json:"suggestions"`
+  TDAAuth *tdaAuth `json:"tda_auth"`
 }
 
 func optionsHandler(w http.ResponseWriter, req *http.Request) {
@@ -280,11 +320,25 @@ func optionsHandler(w http.ResponseWriter, req *http.Request) {
   // Filter those options.
   suggestions := FilterOptions(1<<64 - 1.24, 33.5, options)
 
+  // Get the cookie information if we have one.
+  cookieData, _ := getLoginCookieData(req)
+
+  // We ignore err as it is logged by getLoginCookieData.
   w.Header().Add("Content-Type", "application/json")
   resp := optionsHandlerResponse{
     Options: options,
     Suggestions: suggestions,
   }
+  if cookieData != nil {
+    log.Printf("[INFO] Found AccountID %s", cookieData.TDAAccountId)
+    log.Printf("[INFO] Found Access-Token %s", cookieData.TDAAccessToken)
+
+    resp.TDAAuth = &tdaAuth{
+      AccountId: cookieData.TDAAccountId,
+      AccessToken: cookieData.TDAAccessToken,
+    }
+  }
+
   bytes, err := json.Marshal(resp)
   if err != nil {
     log.Printf("[ERROR] Failed to get option chains (err = %+v)", err)
@@ -299,7 +353,9 @@ func main() {
   http.HandleFunc("/", mainPageHandler)
   http.HandleFunc("/oauth/redirect", oauthRedirectHandler)
   http.HandleFunc("/oauth/login", oauthLoginHandler)
+  http.HandleFunc("/oauth/info", oauthInfoHandler)
   http.HandleFunc("/options", optionsHandler)
+  http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
   port := os.Getenv("PORT")
   if port == "" {

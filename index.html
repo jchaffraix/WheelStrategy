@@ -3,6 +3,35 @@
   TODO: Handle authentication (need to show it here + need access-token to talk to TDA)
   TODO: Only show the login page if not authenticated.
 -->
-<div>Not logged into TDA</div>
-<a href="/oauth/login"><button>Logged in</button></a>
+<head>
+  <script id="template" type="x-tmpl-mustache">
+    {{^loggedIn}}
+      <div>Not logged into TDA. We won't be able to do any trade</div>
+      <a href="/oauth/login"><button>Logged in</button></a>
+    {{/loggedIn}}
+    <h2>Suggestions</h2>
+    {{#suggestions}}
+      <div>
+        <p>{{symbol}}<p>
+        <p>Bid: {{bid}} * {{bidSize}} // Ask: {{ask}} * {{askSize}}</p>
+        <p>Mark: {{mark}}</p>
+        <p>openInterest: {{openInterest}}</p>
+        <button {{^loggedIn}}disabled{{/loggedIn}}>Buy</button>
+      </div>
+    {{/suggestions}}
+    <h2>All options</h2>
+    {{#options}}
+      <div>
+        <p>{{symbol}}<p>
+        <p>Bid: {{bid}} * {{bidSize}} // Ask: {{ask}} * {{askSize}}</p>
+        <p>Mark: {{mark}}</p>
+        <p>openInterest: {{openInterest}}</p>
+        <button {{^loggedIn}}disabled{{/loggedIn}}>Buy</button>
+      </div>
+    {{/options}}
+  </script>
 
+  <script src="static/bootstrap.js"></script>
+  <script src="https://unpkg.com/mustache@4.2.0"></script>
+</head>
+<div id="target">Loading options chain from TDAmeritrade...</div>
