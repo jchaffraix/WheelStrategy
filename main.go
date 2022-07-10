@@ -194,9 +194,7 @@ func oauthRedirectHandler(w http.ResponseWriter, req *http.Request) {
   http.Redirect(w, req, "/", 302)
 }
 
-func renderUnauthenticatedPage(w http.ResponseWriter) {
-  log.Printf("Displaying unauthenticated page")
-
+func oauthLoginHandler(w http.ResponseWriter, req *http.Request) {
   conf, err := getOAuthClient()
   if err != nil {
     log.Printf("Error when getting the oauth client (err = %+v)", err)
@@ -204,15 +202,16 @@ func renderUnauthenticatedPage(w http.ResponseWriter) {
     return
   }
 
- // TODO: Fill state for real so we can validate the redirect.
+  // TODO: Fill state for real so we can validate the redirect.
   state := "state"
   url := conf.AuthCodeURL(state, oauth2.AccessTypeOffline)
-  page := `
-<!DOCTYPE html>
-<div>Not logged into TDA</div>
-<a href="%s"><button>Logged in</button></a>
-`
-  w.Write([]byte(fmt.Sprintf(page, url)))
+
+  http.Redirect(w, req, url, 302)
+}
+
+func renderUnauthenticatedPage(w http.ResponseWriter, req * http.Request) {
+  log.Printf("Displaying unauthenticated page")
+  http.ServeFile(w, req, "index.html")
 }
 
 func mainPageHandler(w http.ResponseWriter, req *http.Request) {
@@ -230,14 +229,14 @@ func mainPageHandler(w http.ResponseWriter, req *http.Request) {
   if err != nil {
     // TODO: ErrNoCookie is emitted when not present.
     log.Printf("[INFO] Couldn't get login cookie (err = %+v)", err)
-    renderUnauthenticatedPage(w)
+    renderUnauthenticatedPage(w, req)
     return
   }
 
   cookie_value, err := base64.StdEncoding.DecodeString(loginCookie.Value)
   if err != nil {
     log.Printf("[Error] Base64 decode the login cookie (err = %+v)", err)
-    renderUnauthenticatedPage(w)
+    renderUnauthenticatedPage(w, req)
     return
   }
 
@@ -246,39 +245,14 @@ func mainPageHandler(w http.ResponseWriter, req *http.Request) {
   if err != nil {
     log.Printf("[ERROR] Cookie is invalid, failed to parse it (err = %+v)", err)
     // TODO: Clear the cookie to help recoveries?
-    renderUnauthenticatedPage(w)
+    renderUnauthenticatedPage(w, req)
     return
   }
 
-  conf, err := getOAuthClient()
-  if err != nil {
-    log.Printf("[ERROR] Failed getting the oauth client (err = %+v)", err)
-    http.Error(w, "Internal Error", http.StatusInternalServerError)
-    return
-  }
   log.Printf("[INFO] Found AccountID %s", loginInfo.TDAAccountId)
   log.Printf("[INFO] Found Access-Token %s", loginInfo.TDAAccessToken)
 
-  /*ctx := context.Background()
-  token := oauth2.Token{AccessToken: loginInfo.TDAAccessToken}
-  client := conf.Client(ctx, &token);*/
-
-  // TODO: WRITE THE ALGORITHM!
-
-  // TODO: The chains endpoint uses the app's key, not the bearer token.
-  /*resp, err := client.Get("https://api.tdameritrade.com/v1/marketdata/chains")
-  _ = resp*/
-
-  // TODO: Fill state for real so we can validate the redirect.
-  state := "state"
-  url := conf.AuthCodeURL(state, oauth2.AccessTypeOffline)
-  // TODO: http.ServeFile(w, req, "index.html")
-  page := `
-<!DOCTYPE html>
-<div>Authed!</div>
-<a href="%s"><button>Logged in</button></a>
-`
-  w.Write([]byte(fmt.Sprintf(page, url)))
+  renderUnauthenticatedPage(w, req)
 }
 
 type optionsHandlerResponse struct {
@@ -323,7 +297,8 @@ func optionsHandler(w http.ResponseWriter, req *http.Request) {
 
 func main() {
   http.HandleFunc("/", mainPageHandler)
-  http.HandleFunc("/oauth", oauthRedirectHandler)
+  http.HandleFunc("/oauth/redirect", oauthRedirectHandler)
+  http.HandleFunc("/oauth/login", oauthLoginHandler)
   http.HandleFunc("/options", optionsHandler)
 
   port := os.Getenv("PORT")
