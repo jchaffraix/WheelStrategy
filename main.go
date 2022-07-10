@@ -281,6 +281,11 @@ func mainPageHandler(w http.ResponseWriter, req *http.Request) {
   w.Write([]byte(fmt.Sprintf(page, url)))
 }
 
+type optionsHandlerResponse struct {
+  Options []Option `json:"options"`
+  Suggestions []Option `json:"suggestions"`
+}
+
 func optionsHandler(w http.ResponseWriter, req *http.Request) {
   settings, err := getAppSettings()
   if err != nil {
@@ -301,15 +306,19 @@ func optionsHandler(w http.ResponseWriter, req *http.Request) {
   // Filter those options.
   suggestions := FilterOptions(1<<64 - 1.24, 33.5, options)
 
-  // TODO: This should return Content-Type JSON.
-  page := `<DOCTYPE html>
-Options:<br>
-<pre>%+v</pre>
+  w.Header().Add("Content-Type", "application/json")
+  resp := optionsHandlerResponse{
+    Options: options,
+    Suggestions: suggestions,
+  }
+  bytes, err := json.Marshal(resp)
+  if err != nil {
+    log.Printf("[ERROR] Failed to get option chains (err = %+v)", err)
+    http.Error(w, "Internal Error", http.StatusInternalServerError)
+    return
+  }
 
-Suggestions:<br>
-<pre>%+v</pre>
-`
-  w.Write([]byte(fmt.Sprintf(page, options, suggestions)))
+  w.Write(bytes)
 }
 
 func main() {

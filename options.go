@@ -186,6 +186,13 @@ func (h *OptionProfitHeap) Pop() any {
 	return x
 }
 
+func min(a, b int) int {
+    if a < b {
+        return a
+    }
+    return b
+}
+
 func FilterOptions(balance, stockPrice float64, options []Option) []Option {
   h := new(OptionProfitHeap)
   for _, option := range options {
@@ -211,10 +218,12 @@ func FilterOptions(balance, stockPrice float64, options []Option) []Option {
     heap.Push(h, option)
   }
 
-  // Pick the top 3:
-  suggestions := make([]Option, 3)
-  suggestions[0] = heap.Pop(h).(Option)
-  suggestions[1] = heap.Pop(h).(Option)
-  suggestions[2] = heap.Pop(h).(Option)
+  // Pick the top 3.
+  topSuggestionSize := min(len(*h), 3)
+  suggestions := make([]Option, topSuggestionSize)
+  for i := 0; i < topSuggestionSize; i++ {
+    suggestions[i] = heap.Pop(h).(Option)
+  }
+
   return suggestions
 }
