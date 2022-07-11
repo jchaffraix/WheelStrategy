@@ -1,15 +1,19 @@
 // Dispatch mandatory calls early.
-optionsPromise = fetch('/options')
+var optionsPromise = fetch('/options');
+var userInfoPromise = fetch('/user/info');
 
 function render() {
-  optionsPromise.then((response) => {
-    // TODO: Check that the response is fine (ok and status on the Response).
-    return response.json()
-  }).then((json) => {
-    var loggedIn = !!json.tda_auth;
+  Promise.all([optionsPromise, userInfoPromise]).then((responses) => {
+    return Promise.all(
+      // TODO: Check that the response is fine (ok and status on the Response).
+      responses.map((response) => response.json())
+    );
+  }).then((jsons) => {
+    var option = jsons[0];
+    var loggedIn = !!jsons[1].access_token;
 
     var template = document.getElementById('template').innerHTML;
-    var rendered = Mustache.render(template, { loggedIn: loggedIn, options: json.options, suggestions: json.suggestions });
+    var rendered = Mustache.render(template, { loggedIn: loggedIn, options: option.options, suggestions: option.suggestions });
     document.getElementById('target').innerHTML = rendered;
   })
   .catch((error) => {

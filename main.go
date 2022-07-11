@@ -289,16 +289,10 @@ func mainPageHandler(w http.ResponseWriter, req *http.Request) {
   http.ServeFile(w, req, "index.html")
 }
 
-type tdaAuth struct {
-  AccountId string `json:"account_id"`
-  AccessToken string `json:"access_token"`
-}
-
 type optionsHandlerResponse struct {
   Quote Quote `json:"quote"`
   Options []Option `json:"options"`
   Suggestions []Option `json:"suggestions"`
-  TDAAuth *tdaAuth `json:"tda_auth"`
 }
 
 func optionsHandler(w http.ResponseWriter, req *http.Request) {
@@ -332,29 +326,54 @@ func optionsHandler(w http.ResponseWriter, req *http.Request) {
   // Filter those options.
   suggestions := FilterOptions(1<<64 - 1.24, quote.LastPrice, options)
 
-  // Get the cookie information if we have one.
-  cookieData, _ := getLoginCookieData(req)
-
-  // We ignore err as it is logged by getLoginCookieData.
   w.Header().Add("Content-Type", "application/json")
   resp := optionsHandlerResponse{
     Quote: *quote,
     Options: options,
     Suggestions: suggestions,
   }
+  bytes, err := json.Marshal(resp)
+  if err != nil {
+    log.Printf("[ERROR] Failed to get option chains (err = %+v)", err)
+    http.Error(w, "Internal Error", http.StatusInternalServerError)
+    return
+  }
+
+  w.Write(bytes)
+}
+
+type userInfo struct {
+  AccountId string `json:"account_id"`
+  Balance float64 `json:"balance"`
+}
+
+type userInfoResponse struct {
+  UserInfo *userInfo `json:"user_info"`
+  AccessToken *string `json:"access_token"`
+}
+
+func userInfoHandler(w http.ResponseWriter, req *http.Request) {
+  // Get the cookie information if we have one.
+  // We ignore err as it is logged by getLoginCookieData.
+  cookieData, _ := getLoginCookieData(req)
+
+  w.Header().Add("Content-Type", "application/json")
+  resp := userInfoResponse{
+  }
+
   if cookieData != nil {
     log.Printf("[INFO] Found AccountID %s", cookieData.TDAAccountId)
     log.Printf("[INFO] Found Access-Token %s", cookieData.TDAAccessToken)
 
-    resp.TDAAuth = &tdaAuth{
+    resp.UserInfo = &userInfo{
       AccountId: cookieData.TDAAccountId,
-      AccessToken: cookieData.TDAAccessToken,
     }
+    resp.AccessToken = &cookieData.TDAAccessToken
   }
 
   bytes, err := json.Marshal(resp)
   if err != nil {
-    log.Printf("[ERROR] Failed to get option chains (err = %+v)", err)
+    log.Printf("[ERROR] Failed to marshal user info (err = %+v)", err)
     http.Error(w, "Internal Error", http.StatusInternalServerError)
     return
   }
@@ -368,6 +387,7 @@ func main() {
   http.HandleFunc("/oauth/login", oauthLoginHandler)
   http.HandleFunc("/oauth/info", oauthInfoHandler)
   http.HandleFunc("/options", optionsHandler)
+  http.HandleFunc("/user/info", userInfoHandler)
   http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
   port := os.Getenv("PORT")
