@@ -295,6 +295,7 @@ type tdaAuth struct {
 }
 
 type optionsHandlerResponse struct {
+  Quote Quote `json:"quote"`
   Options []Option `json:"options"`
   Suggestions []Option `json:"suggestions"`
   TDAAuth *tdaAuth `json:"tda_auth"`
@@ -308,17 +309,28 @@ func optionsHandler(w http.ResponseWriter, req *http.Request) {
     return
   }
 
+  // TODO: Allow the symbol to be customized.
+  symbol := "WY"
+
+  // Get the symbol for its last price (used to filter the options).
+  quote, err := GetQuote(symbol, settings.TDAClientId)
+  if err != nil {
+    log.Printf("[ERROR] Failed to get quote for symbol %s (err = %+v)", symbol, err)
+    http.Error(w, "Internal Error", http.StatusInternalServerError)
+    return
+  }
+
   start := time.Now().AddDate(/*years*/0, /*months*/0, /*days*/20)
   end := start.AddDate(/*years*/0, /*months*/0, /*days*/30)
-  options, err := GetOptionChain("WY", settings.TDAClientId, PUT, start, end)
+  options, err := GetOptionChain(symbol, settings.TDAClientId, PUT, start, end)
   if err != nil {
-    log.Printf("[ERROR] Failed to get option chains (err = %+v)", err)
+    log.Printf("[ERROR] Failed to get option chains for symbol %s (err = %+v)", symbol, err)
     http.Error(w, "Internal Error", http.StatusInternalServerError)
     return
   }
 
   // Filter those options.
-  suggestions := FilterOptions(1<<64 - 1.24, 33.5, options)
+  suggestions := FilterOptions(1<<64 - 1.24, quote.LastPrice, options)
 
   // Get the cookie information if we have one.
   cookieData, _ := getLoginCookieData(req)
@@ -326,6 +338,7 @@ func optionsHandler(w http.ResponseWriter, req *http.Request) {
   // We ignore err as it is logged by getLoginCookieData.
   w.Header().Add("Content-Type", "application/json")
   resp := optionsHandlerResponse{
+    Quote: *quote,
     Options: options,
     Suggestions: suggestions,
   }
