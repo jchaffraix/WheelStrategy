@@ -9,11 +9,13 @@ function render() {
       responses.map((response) => response.json())
     );
   }).then((jsons) => {
-    var option = jsons[0];
-    var loggedIn = !!jsons[1].access_token;
+    const option = jsons[0];
+    const userInfo = jsons[1];
+    const loggedIn = !!userInfo.access_token;
+    const cash_available = userInfo.user_info.cash_available || null;
 
     var template = document.getElementById('template').innerHTML;
-    var rendered = Mustache.render(template, { loggedIn: loggedIn, options: option.options, suggestions: option.suggestions });
+    var rendered = Mustache.render(template, { loggedIn: loggedIn, availableFortrading: cash_available, options: option.options, suggestions: option.suggestions });
     document.getElementById('target').innerHTML = rendered;
   })
   .catch((error) => {

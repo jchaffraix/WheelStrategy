@@ -5,6 +5,9 @@
 -->
 <head>
   <script id="template" type="x-tmpl-mustache">
+    {{#loggedIn}}
+      <p>Available for trading: ${{availableFortrading}}</p>
+    {{/loggedIn}}
     {{^loggedIn}}
       <div>Not logged into TDA. We won't be able to do any trade</div>
       <a href="/oauth/login"><button>Logged in</button></a>

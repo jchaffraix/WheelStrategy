@@ -171,8 +171,6 @@ func oauthRedirectHandler(w http.ResponseWriter, req *http.Request) {
   log.Printf("Expiry: %+v", token.Expiry)
   log.Printf("Refresh Token: %s", token.RefreshToken)
 
-  // TODO: This should probably be a separate step in the UI.
-
   // Get account ID.
   client := conf.Client(ctx, token)
   resp, err := client.Get("https://api.tdameritrade.com/v1/accounts")
@@ -344,7 +342,7 @@ func optionsHandler(w http.ResponseWriter, req *http.Request) {
 
 type userInfo struct {
   AccountId string `json:"account_id"`
-  Balance float64 `json:"balance"`
+  CashAvailableForTrading float64 `json:"cash_available"`
 }
 
 type userInfoResponse struct {
@@ -353,20 +351,26 @@ type userInfoResponse struct {
 }
 
 func userInfoHandler(w http.ResponseWriter, req *http.Request) {
-  // Get the cookie information if we have one.
-  // We ignore err as it is logged by getLoginCookieData.
-  cookieData, _ := getLoginCookieData(req)
-
   w.Header().Add("Content-Type", "application/json")
   resp := userInfoResponse{
   }
 
+  // Get the cookie information if we have one.
+  // We ignore err as it is logged by getLoginCookieData.
+  cookieData, _ := getLoginCookieData(req)
   if cookieData != nil {
+    userAccountInfo, err := GetUserAccountInfo(cookieData.TDAAccountId, cookieData.TDAAccessToken)
+    if err != nil {
+      log.Printf("[ERROR] Failed to get user account info (err = %+v)", err)
+      http.Error(w, "Internal Error", http.StatusInternalServerError)
+      return
+    }
     log.Printf("[INFO] Found AccountID %s", cookieData.TDAAccountId)
     log.Printf("[INFO] Found Access-Token %s", cookieData.TDAAccessToken)
 
     resp.UserInfo = &userInfo{
       AccountId: cookieData.TDAAccountId,
+      CashAvailableForTrading: userAccountInfo.CashAvailableForTrading,
     }
     resp.AccessToken = &cookieData.TDAAccessToken
   }
